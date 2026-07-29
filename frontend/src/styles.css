@@ -1,0 +1,140 @@
+/* ===== Apple Design System - Global Styles ===== */
+
+:root {
+  /* Colors - Apple Palette */
+  --color-blue: #007aff;
+  --color-green: #34c759;
+  --color-red: #ff3b30;
+  --color-orange: #ff9500;
+  --color-yellow: #ffcc00;
+  --color-purple: #af52de;
+  --color-pink: #ff2d55;
+  --color-teal: #5ac8fa;
+  --color-gray: #8e8e93;
+
+  /* Text Colors */
+  --text-primary: #1d1d1f;
+  --text-secondary: #86868b;
+  --text-tertiary: #aeaeb2;
+
+  /* Background Colors */
+  --bg-primary: #f5f5f7;
+  --bg-elevated: #ffffff;
+  --bg-grouped: #f2f2f7;
+
+  /* Typography - SF Pro */
+  --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'SF Pro Icons', system-ui, sans-serif;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Border Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+
+  /* Transitions */
+  --transition-fast: 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-normal: 0.25s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Global Reset */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  line-height: 1.47;
+}
+
+/* Element Plus Overrides - Apple Style */
+.el-button--primary {
+  background: var(--color-blue) !important;
+  border-color: var(--color-blue) !important;
+  border-radius: var(--radius-sm) !important;
+  font-weight: 600 !important;
+  transition: all var(--transition-fast) !important;
+}
+
+.el-button--primary:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+
+.el-card {
+  border-radius: var(--radius-lg) !important;
+  border: 0.5px solid rgba(0, 0, 0, 0.06) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.el-input__wrapper {
+  border-radius: var(--radius-sm) !important;
+}
+
+.el-tag {
+  border-radius: var(--radius-sm) !important;
+  font-weight: 500 !important;
+}
+
+.el-table {
+  border-radius: var(--radius-md) !important;
+  overflow: hidden;
+}
+
+.el-table th {
+  background: var(--bg-grouped) !important;
+  font-weight: 600 !important;
+}
+
+/* Scrollbar - Thin Apple Style */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Selection */
+::selection {
+  background: rgba(0, 122, 255, 0.2);
+}
+
+/* Focus Ring - Apple Style */
+:focus-visible {
+  outline: 3px solid rgba(0, 122, 255, 0.3);
+  outline-offset: 2px;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
