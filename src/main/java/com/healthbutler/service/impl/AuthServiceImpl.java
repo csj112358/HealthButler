@@ -5,6 +5,7 @@ import com.healthbutler.dto.LoginRequest;
 import com.healthbutler.dto.RegisterRequest;
 import com.healthbutler.entity.User;
 import com.healthbutler.mapper.UserMapper;
+import com.healthbutler.exception.BusinessException;
 import com.healthbutler.service.AuthService;
 import com.healthbutler.util.JwtUtil;
 import com.healthbutler.vo.LoginResult;
@@ -33,7 +34,7 @@ public class AuthServiceImpl implements AuthService {
         );
 
         if (existingUser != null) {
-            throw new RuntimeException("用户名已存在");
+            throw new BusinessException(400, "用户名已存在");
         }
 
         // 创建用户
@@ -60,7 +61,7 @@ public class AuthServiceImpl implements AuthService {
         );
 
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException(400, "用户不存在");
         }
 
         // 验证密码（简化处理，实际应该验证加密密码）
@@ -83,7 +84,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public String refreshToken(String token) {
         if (!jwtUtil.validateToken(token)) {
-            throw new RuntimeException("Token无效或已过期");
+            throw new BusinessException(401, "Token无效或已过期");
         }
 
         Long userId = jwtUtil.getUserIdFromToken(token);

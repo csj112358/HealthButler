@@ -9,6 +9,7 @@
 ## 目录
 
 - [项目结构](#项目结构)
+- [一键启动 / 停止](#一键启动--停止)
 - [技术栈](#技术栈)
 - [核心功能](#核心功能)
 - [部署前准备（环境安装）](#部署前准备环境安装)
@@ -28,7 +29,7 @@
 > ⚠️ 注意：后端代码直接在项目根目录下，不是在 `backend/` 子目录里。
 
 ```
-your-project/
+E:\Github\C_Check_Up_Home\
 ├── src/                              # 后端 Java 代码（Spring Boot）
 │   └── main/
 │       ├── java/com/healthbutler/
@@ -64,8 +65,38 @@ your-project/
 ├── database/
 │   └── schema.sql                    # ⭐ 数据库建表脚本
 ├── pom.xml                           # 后端 Maven 依赖配置
+├── start.bat                         # 一键启动脚本（自动检测 MySQL/Redis）
+├── stop.bat                          # 一键停止脚本
+├── MIGRATION.md                      # 换电脑迁移备忘录
 └── README.md                         # 就是本文件
 ```
+
+---
+
+## 一键启动 / 停止
+
+如果你的环境已装好（JDK 17、Maven、Node.js、MySQL、Redis），直接双击：
+
+```cmd
+start.bat
+```
+
+脚本会自动完成：
+1. 检测并启动 MySQL（如未运行）
+2. 检测并启动 Redis（支持 Memurai / Docker / WSL）
+3. 启动后端（Spring Boot → `:8080`）
+4. 启动前端（Vite → `:3000`）
+5. 打开浏览器访问 http://localhost:3000
+
+停止所有服务：
+
+```cmd
+stop.bat
+```
+
+会同时按窗口标题和端口号清理进程，确保彻底释放 8080/3000 端口。
+
+> ⚠️ 如果开机第一次运行 `start.bat` 提示 MySQL 端口被占用，可能是 Windows 快速启动导致的端口残留。解决方案见 [常见问题排查 → MySQL 端口占用](#-开机后-mysql-端口-3306-被占用)。
 
 ---
 
@@ -152,7 +183,7 @@ sudo apt install openjdk-17-jdk
 1. 打开 https://dev.mysql.com/downloads/installer/
 2. 下载 MySQL Installer（选较大的那个完整包，约 300MB）
 3. 安装时选择 "Developer Default" 或 "Server only"
-4. **设置 root 密码**：会让你输入密码，**记住这个密码，后面要用！** 比如设成 `your_password`
+4. **设置 root 密码**：会让你输入密码，**记住这个密码，后面要用！** 比如设成 `123456`
 5. 端口保持默认 `3306`
 6. 安装完成后，打开命令提示符测试：
    ```bash
@@ -327,11 +358,13 @@ sudo apt install maven
 
 所有环境都装好之后，按顺序执行以下步骤。
 
+> 💡 **提示**：日常使用直接双击 `start.bat` 即可一键启动，无需每次手动执行以下步骤。以下步骤仅首次部署时需要。
+
 ### 第一步：初始化数据库
 
 1. 打开命令提示符（CMD），进入项目目录：
    ```cmd
-   cd /d your-project-path
+   cd /d E:\Github\C_Check_Up_Home
    ```
    > ⚠️ 注意：如果项目在其他盘符（如 E:），必须加 `/d` 参数才能切换盘符。
 
@@ -416,7 +449,7 @@ aliyun:
 
 1. 打开命令提示符（CMD），进入项目根目录：
    ```cmd
-   cd /d your-project-path
+   cd /d E:\Github\C_Check_Up_Home
    ```
 
 2. 用 Maven 启动后端：
@@ -445,7 +478,7 @@ aliyun:
 
 1. 进入前端目录：
    ```cmd
-   cd /d your-project-path\frontend
+   cd /d E:\Github\C_Check_Up_Home\frontend
    ```
 
 2. 安装依赖：
@@ -500,6 +533,50 @@ Maven 没装好。重新安装或手动加 PATH。或者用 IDE 自带的 Maven�
 
 ### ❌ 后端启动报 "Access denied for user"
 MySQL 用户名或密码错了。检查 `application.yml` 里的 `username` 和 `password`。
+
+### ❌ 登录报 "Public Key Retrieval is not allowed"
+
+**现象**：MySQL 9.0+ 版本下，后端连接数据库时报错，日志中出现 `Public Key Retrieval is not allowed`。
+
+**原因**：MySQL 8.0.4+ 默认使用 `caching_sha2_password` 认证插件，JDBC 驱动连接时需要获取公钥，但默认不允许。
+
+**解决**：在 `application.yml` 的数据库 URL 末尾加上 `&allowPublicKeyRetrieval=true`：
+```yaml
+url: jdbc:mysql://localhost:3306/health_butler?...&allowPublicKeyRetrieval=true
+```
+
+### ❌ 后端用 JDK 26 启动后崩溃（Process terminated with exit code: 1）
+
+**现象**：`mvn spring-boot:run` 启动后显示 Spring Boot banner，随即 `BUILD FAILURE`。
+
+**原因**：Spring Boot 3.2 不兼容 JDK 26。JDK 26 加强了本机访问限制，Tomcat 等组件无法正常运行。
+
+**解决**：使用 JDK 17。项目已配置 `run_backend.bat` 自动切换到 `C:\Program Files\Java\jdk-17`，直接双击启动即可。
+
+### ❌ 前端中文（用户名、报告等）提交后报 500 错误
+
+**现象**：英文内容正常，但提交含中文的请求时后端返回 `系统内部错误`。
+
+**原因**：Tomcat 默认使用系统编码解析请求体，Windows 中文系统使用 GBK，而前端发送的是 UTF-8，导致中文乱码后 Jackson 解析失败。
+
+**解决**：已在 `application.yml` 配置强制 UTF-8：
+```yaml
+server:
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+```
+并在 `SecurityConfig` 中注册了 `CharacterEncodingFilter`。
+
+### ❌ 开机后 MySQL 未自动启动
+
+**现象**：重启电脑后 MySQL 服务未运行，需手动打开 HeidiSQL 连接才能启动。
+
+**原因**：MySQL 9.7 的 Windows 服务在开机时可能启动失败（端口残留或时序问题）。
+
+**解决**：`run_backend.bat` 已内置自动检测和拉起逻辑——先尝试 `net start MySQL80`，失败则直接运行 `mysqld.exe`。日常使用直接双击 `start.bat` 或 `run_backend.bat` 即可。
 
 ### ❌ npm install 报错
 - 确认 Node.js 安装成功：`node -v`

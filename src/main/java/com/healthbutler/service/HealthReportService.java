@@ -90,4 +90,36 @@ public interface HealthReportService {
      * @return 指标列表（包含名称、分类、最新值、状态等）
      */
     List<Map<String, Object>> getUserIndicators(Long userId);
+
+    /**
+     * 合并多个指标为同一个标准指标
+     * @param userId 用户ID
+     * @param standardNames 要合并的当前指标名称列表
+     * @param newStandardName 合并后的标准名称
+     * @param category 指标分类
+     * @param unit 单位
+     * @param referenceRange 参考范围
+     */
+    void mergeItems(Long userId, List<String> standardNames, String newStandardName, String category, String unit, String referenceRange);
+
+    /**
+     * 导出用户全部数据
+     * @param userId 用户ID
+     * @return 包含用户、报告、指标、字典、诊断的完整数据
+     */
+    Map<String, Object> exportAllData(Long userId);
+
+    /**
+     * AI扫描重复指标，返回候选合并组
+     * @param userId 用户ID
+     * @return AI识别的候选合并组列表
+     */
+    List<Map<String, Object>> scanDuplicateIndicators(Long userId);
+
+    /**
+     * 更新指标在字典中的参考范围（同时更新所有关联的 health_item）
+     * @param standardName 标准指标名
+     * @param referenceRange 新的参考范围
+     */
+    void updateReferenceRange(String standardName, String referenceRange);
 }

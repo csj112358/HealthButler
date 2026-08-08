@@ -1,19 +1,28 @@
 package com.healthbutler.controller;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.healthbutler.entity.HealthReport;
+import com.healthbutler.exception.BusinessException;
+import com.healthbutler.service.AiService;
+import com.healthbutler.service.ExportService;
 import com.healthbutler.service.HealthReportService;
 import com.healthbutler.vo.DiagnosisResult;
+import com.healthbutler.vo.Result;
 import com.healthbutler.vo.TrendData;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import com.alibaba.fastjson.JSONObject;
 
 @RestController
 @RequestMapping("/api/report")
@@ -22,211 +31,158 @@ public class HealthReportController {
     @Autowired
     private HealthReportService healthReportService;
 
-    /**
-     * 上传体检报告图片并进行OCR识别
-     */
+    @Autowired
+    private ExportService exportService;
+
+    @Autowired
+    private AiService aiService;
+
     @PostMapping("/upload")
-    public Map<String, Object> uploadReport(
+    public Result<Long> uploadReport(
             @RequestParam("userId") Long userId,
             @RequestParam("file") MultipartFile file) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            Long reportId = healthReportService.uploadAndExtract(userId, file);
-            result.put("code", 200);
-            result.put("message", "上传成功，请审核识别结果");
-            result.put("data", reportId);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "上传失败：" + e.getMessage());
-        }
-        return result;
+        Long reportId = healthReportService.uploadAndExtract(userId, file);
+        return Result.ok("上传成功，请审核识别结果", reportId);
     }
 
-    /**
-     * 通过文字内容创建体检报告（用户手动粘贴）
-     */
     @PostMapping("/text")
-    public Map<String, Object> createFromText(@RequestBody JSONObject body) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-            String text = body.getString("text");
-            if (text == null || text.trim().isEmpty()) {
-                result.put("code", 400);
-                result.put("message", "请输入体检报告文字");
-                return result;
-            }
-            Map<String, Object> data = healthReportService.createFromText(userId, text);
-            result.put("code", 200);
-            result.put("message", "解析成功，请审核识别结果");
-            result.put("data", data);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "解析失败：" + e.getMessage());
+    public Result<Map<String, Object>> createFromText(@RequestBody JSONObject body) {
+        Long userId = getCurrentUserId();
+        String text = body.getString("text");
+        if (text == null || text.trim().isEmpty()) {
+            throw new BusinessException(400, "请输入体检报告文字");
         }
-        return result;
+        Map<String, Object> data = healthReportService.createFromText(userId, text);
+        return Result.ok("解析成功，请审核识别结果", data);
     }
 
-    /**
-     * 确认报告数据（用户审核后，可附带编辑后的数据）
-     */
     @PostMapping("/confirm/{reportId}")
-    public Map<String, Object> confirmReport(
+    public Result<Void> confirmReport(
             @PathVariable Long reportId,
             @RequestBody(required = false) Map<String, Object> editedData) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            healthReportService.confirmReport(reportId, editedData);
-            result.put("code", 200);
-            result.put("message", "确认成功");
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "确认失败：" + e.getMessage());
-        }
-        return result;
+        healthReportService.confirmReport(reportId, editedData);
+        return Result.ok("确认成功", null);
     }
 
-    /**
-     * 更新报告数据（编辑指标明细、日期、医院等）
-     */
     @PutMapping("/update/{reportId}")
-    public Map<String, Object> updateReport(
+    public Result<Void> updateReport(
             @PathVariable Long reportId,
             @RequestBody Map<String, Object> editedData) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            healthReportService.updateReport(reportId, editedData);
-            result.put("code", 200);
-            result.put("message", "更新成功");
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "更新失败：" + e.getMessage());
-        }
-        return result;
+        healthReportService.updateReport(reportId, editedData);
+        return Result.ok("更新成功", null);
     }
 
-    /**
-     * 删除报告
-     */
     @DeleteMapping("/delete/{reportId}")
-    public Map<String, Object> deleteReport(@PathVariable Long reportId) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            healthReportService.deleteReport(reportId);
-            result.put("code", 200);
-            result.put("message", "删除成功");
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "删除失败：" + e.getMessage());
-        }
-        return result;
+    public Result<Void> deleteReport(@PathVariable Long reportId) {
+        healthReportService.deleteReport(reportId);
+        return Result.ok("删除成功", null);
     }
 
-    /**
-     * 获取用户所有报告列表
-     */
     @GetMapping("/list/{userId}")
-    public Map<String, Object> getUserReports(@PathVariable Long userId) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            List<HealthReport> reports = healthReportService.getUserReports(userId);
-            result.put("code", 200);
-            result.put("data", reports);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "获取失败：" + e.getMessage());
-        }
-        return result;
+    public Result<List<HealthReport>> getUserReports(@PathVariable Long userId) {
+        List<HealthReport> reports = healthReportService.getUserReports(userId);
+        return Result.ok(reports);
     }
 
-    /**
-     * 获取单个报告详情（包含指标明细）
-     */
     @GetMapping("/detail/{reportId}")
-    public Map<String, Object> getReportDetail(@PathVariable Long reportId) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            Map<String, Object> detail = healthReportService.getReportDetail(reportId);
-            result.put("code", 200);
-            result.put("data", detail);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "获取失败：" + e.getMessage());
-        }
-        return result;
+    public Result<Map<String, Object>> getReportDetail(@PathVariable Long reportId) {
+        Map<String, Object> detail = healthReportService.getReportDetail(reportId);
+        return Result.ok(detail);
     }
 
-    /**
-     * 获取指标趋势数据（用于ECharts展示）
-     */
     @GetMapping("/trend/{userId}/{standardName}")
-    public Map<String, Object> getTrendData(
+    public Result<TrendData> getTrendData(
             @PathVariable Long userId,
             @PathVariable String standardName) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            TrendData trendData = healthReportService.getTrendData(userId, standardName);
-            result.put("code", 200);
-            result.put("data", trendData);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "获取失败：" + e.getMessage());
-        }
-        return result;
+        TrendData trendData = healthReportService.getTrendData(userId, standardName);
+        return Result.ok(trendData);
     }
 
-    /**
-     * 获取同类指标趋势数据
-     */
     @GetMapping("/trend/category/{userId}/{category}")
-    public Map<String, Object> getCategoryTrendData(
+    public Result<List<TrendData>> getCategoryTrendData(
             @PathVariable Long userId,
             @PathVariable String category) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            List<TrendData> trendDataList = healthReportService.getCategoryTrendData(userId, category);
-            result.put("code", 200);
-            result.put("data", trendDataList);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "获取失败：" + e.getMessage());
-        }
-        return result;
+        List<TrendData> trendDataList = healthReportService.getCategoryTrendData(userId, category);
+        return Result.ok(trendDataList);
     }
 
-    /**
-     * 生成AI健康诊断
-     */
     @PostMapping("/diagnosis")
-    public Map<String, Object> generateDiagnosis(
+    public Result<DiagnosisResult> generateDiagnosis(
             @RequestParam("userId") Long userId,
             @RequestParam("reportIds") List<Long> reportIds) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            DiagnosisResult diagnosisResult = healthReportService.generateDiagnosis(userId, reportIds);
-            result.put("code", 200);
-            result.put("data", diagnosisResult);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "生成诊断失败：" + e.getMessage());
-        }
-        return result;
+        DiagnosisResult diagnosisResult = healthReportService.generateDiagnosis(userId, reportIds);
+        return Result.ok(diagnosisResult);
     }
 
-    /**
-     * 获取用户所有有数据的指标列表
-     */
-    @GetMapping("/indicators/{userId}")
-    public Map<String, Object> getUserIndicators(@PathVariable Long userId) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            List<Map<String, Object>> indicators = healthReportService.getUserIndicators(userId);
-            result.put("code", 200);
-            result.put("data", indicators);
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "获取失败：" + e.getMessage());
+    @PostMapping("/merge-items")
+    public Result<Void> mergeItems(@RequestBody JSONObject body) {
+        Long userId = getCurrentUserId();
+        List<String> standardNames = body.getJSONArray("standardNames").toJavaList(String.class);
+        String newStandardName = body.getString("newStandardName");
+        String category = body.getString("category");
+        String unit = body.getString("unit");
+        String referenceRange = body.getString("referenceRange");
+        healthReportService.mergeItems(userId, standardNames, newStandardName, category, unit, referenceRange);
+        return Result.ok("合并成功", null);
+    }
+
+    @PostMapping("/scan-duplicates")
+    public Result<List<Map<String, Object>>> scanDuplicates() {
+        Long userId = getCurrentUserId();
+        List<Map<String, Object>> groups = healthReportService.scanDuplicateIndicators(userId);
+        return Result.ok(groups);
+    }
+
+    @GetMapping("/export/{userId}")
+    public ResponseEntity<byte[]> exportAllData(@PathVariable Long userId) {
+        String html = exportService.generateHtmlReport(userId);
+        byte[] htmlBytes = html.getBytes(StandardCharsets.UTF_8);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .header("Content-Disposition",
+                        "attachment;filename=\"体检数据_" + LocalDate.now() + ".html\"")
+                .body(htmlBytes);
+    }
+
+    @PostMapping("/suggest-ranges")
+    public Result<Object> suggestRanges(@RequestBody JSONObject body) {
+        List<Map<String, String>> indicators = new ArrayList<>();
+        for (Object item : body.getJSONArray("indicators")) {
+            Map<String, Object> obj;
+            if (item instanceof JSONObject) {
+                obj = ((JSONObject) item).getInnerMap();
+            } else if (item instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> map = (Map<String, Object>) item;
+                obj = map;
+            } else {
+                continue;
+            }
+            Map<String, String> m = new HashMap<>();
+            m.put("name", obj.get("name") != null ? obj.get("name").toString() : "");
+            m.put("category", obj.get("category") != null ? obj.get("category").toString() : "");
+            m.put("unit", obj.get("unit") != null ? obj.get("unit").toString() : "");
+            indicators.add(m);
         }
-        return result;
+        String aiResult = aiService.suggestReferenceRanges(indicators);
+        return Result.ok(JSON.parse(aiResult));
+    }
+
+    @PutMapping("/update-range")
+    public Result<Void> updateReferenceRange(@RequestBody JSONObject body) {
+        String name = body.getString("name");
+        String referenceRange = body.getString("referenceRange");
+        healthReportService.updateReferenceRange(name, referenceRange);
+        return Result.ok("更新成功", null);
+    }
+
+    @GetMapping("/indicators/{userId}")
+    public Result<List<Map<String, Object>>> getUserIndicators(@PathVariable Long userId) {
+        List<Map<String, Object>> indicators = healthReportService.getUserIndicators(userId);
+        return Result.ok(indicators);
+    }
+
+    private Long getCurrentUserId() {
+        return (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }
 }

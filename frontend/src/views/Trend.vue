@@ -7,6 +7,37 @@
         <span class="page-subtitle">追踪健康指标变化</span>
       </div>
       <div class="header-right">
+        <el-button
+          type="primary"
+          size="small"
+          :loading="scanLoading"
+          @click="handleAiScan"
+        >
+          AI 扫描相似指标
+        </el-button>
+        <el-button
+          type="success"
+          size="small"
+          :loading="rangeLoading"
+          @click="handleSuggestRanges"
+        >
+          AI 补全参考范围
+        </el-button>
+        <el-button
+          v-if="selectedIndicators.length >= 1"
+          size="small"
+          @click="exportToHtml"
+        >
+          导出趋势
+        </el-button>
+        <el-button
+          v-if="selectedIndicators.length >= 2"
+          type="warning"
+          size="small"
+          @click="openMergeDialog"
+        >
+          合并选中指标 ({{ selectedIndicators.length }})
+        </el-button>
         <el-input
           v-model="searchText"
           placeholder="搜索指标..."
@@ -150,14 +181,157 @@
       </template>
     </div>
   </div>
+
+  <!-- 合并指标对话框 -->
+  <el-dialog
+    v-model="showMergeDialog"
+    title="合并指标"
+    width="480px"
+    :close-on-click-modal="false"
+  >
+    <div class="merge-dialog-content">
+      <div class="merge-section">
+        <label>已选指标</label>
+        <div class="merge-tags">
+          <el-tag v-for="name in selectedIndicators" :key="name" type="info">{{ name }}</el-tag>
+        </div>
+      </div>
+
+      <div class="merge-section">
+        <label>合并后名称</label>
+        <el-input v-model="mergeForm.newStandardName" placeholder="输入标准指标名称" />
+      </div>
+
+      <div class="merge-section">
+        <label>分类</label>
+        <el-select v-model="mergeForm.category" style="width: 100%" allow-create filterable>
+          <template v-for="cat in categories" :key="cat.key">
+            <el-option v-if="cat.key !== 'all'" :label="cat.label" :value="cat.key" />
+          </template>
+        </el-select>
+      </div>
+
+      <div class="merge-section">
+        <label>单位</label>
+        <el-input v-model="mergeForm.unit" placeholder="如 U/L、mmol/L" />
+      </div>
+
+      <div class="merge-section">
+        <label>参考范围</label>
+        <div class="range-row">
+          <el-input v-model="mergeForm.referenceRange" placeholder="如 0-40" />
+          <el-dropdown @command="useRangeFrom">
+            <el-button size="small">从指标选</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="ind in mergeIndicators"
+                  :key="ind.name"
+                  :command="ind.name"
+                >
+                  {{ ind.name }}: {{ ind.referenceRange || '无' }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </div>
+    </div>
+
+    <template #footer>
+      <el-button @click="showMergeDialog = false">取消</el-button>
+      <el-button type="primary" :loading="mergeSubmitting" @click="handleMerge">
+        确认合并
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <!-- AI 扫描相似指标对话框 -->
+  <el-dialog
+    v-model="showScanDialog"
+    title="AI 扫描结果 — 第 {{ scanCurrentIndex + 1 }}/{{ scanGroups.length }} 组"
+    width="480px"
+    :close-on-click-modal="false"
+  >
+    <div v-if="scanGroups.length === 0" style="text-align:center;padding:30px;color:#86868b">
+      AI 未发现相似指标
+    </div>
+    <template v-else>
+      <div style="font-size:13px;color:#86868b;margin-bottom:12px;padding:8px 12px;background:#f0f5ff;border-radius:8px">
+        💡 {{ scanGroups[scanCurrentIndex]?.reason }}
+      </div>
+      <div style="font-weight:600;font-size:14px;margin-bottom:10px">选择最终指标名称：</div>
+      <el-radio-group v-model="scanSelections[scanCurrentIndex].name" style="display:flex;flex-direction:column;gap:8px;width:100%">
+        <el-radio v-for="name in enrichedScanNames" :key="name.name" :value="name.name" style="margin-right:0;width:100%">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%">
+            <span style="font-weight:500">{{ name.name }}</span>
+            <span v-if="name.category" style="font-size:11px;background:#f0f5ff;color:#007aff;padding:1px 6px;border-radius:4px">{{ name.category }}</span>
+            <span v-if="name.unit" style="font-size:11px;color:#86868b">单位: {{ name.unit }}</span>
+            <span v-if="name.referenceRange" style="font-size:11px;color:#86868b">范围: {{ name.referenceRange }}</span>
+            <span v-if="!name.unit && !name.referenceRange" style="font-size:11px;color:#ccc">无单位/范围信息</span>
+          </div>
+        </el-radio>
+      </el-radio-group>
+    </template>
+    <template #footer>
+      <div style="display:flex;justify-content:space-between;width:100%">
+        <el-button v-if="scanCurrentIndex > 0" @click="scanCurrentIndex--">上一组</el-button>
+        <span v-else></span>
+        <div style="display:flex;gap:8px">
+          <el-button @click="skipGroup">跳过</el-button>
+          <el-button type="primary" @click="mergeCurrentGroup">{{ scanCurrentIndex >= scanGroups.length - 1 ? '确认合并' : '合并并下一组' }}</el-button>
+        </div>
+      </div>
+    </template>
+  </el-dialog>
+
+  <!-- AI 补全参考范围对话框 -->
+  <el-dialog
+    v-model="showRangeDialog"
+    :title="rangeResults.length > 0 ? `AI 建议参考范围 — 第 ${rangeCurrent + 1}/${rangeResults.length} 个` : 'AI 补全参考范围'"
+    width="500px"
+    :close-on-click-modal="false"
+  >
+    <div v-if="rangeResults.length === 0 && !rangeLoading" style="text-align:center;padding:30px;color:#86868b">
+      本次未发现需要补全的指标
+    </div>
+    <template v-else-if="rangeResults.length > 0">
+      <div style="margin-bottom:16px">
+        <div style="font-weight:600;font-size:15px;margin-bottom:4px">{{ rangeResults[rangeCurrent]?.name }}</div>
+        <div style="font-size:12px;color:#86868b">
+          <span v-if="rangeResults[rangeCurrent]?.category">分类：{{ rangeResults[rangeCurrent]?.category }}</span>
+          <span v-if="rangeResults[rangeCurrent]?.unit"> | 单位：{{ rangeResults[rangeCurrent]?.unit }}</span>
+        </div>
+      </div>
+      <div style="background:#f0f5ff;border-radius:10px;padding:16px;margin-bottom:12px">
+        <div style="font-size:13px;color:#86868b;margin-bottom:6px">💡 AI 建议</div>
+        <div style="font-size:18px;font-weight:700;color:#007aff;margin-bottom:4px">
+          参考范围：{{ rangeResults[rangeCurrent]?.suggestedRange }}
+        </div>
+        <div style="font-size:12px;color:#666">{{ rangeResults[rangeCurrent]?.reason }}</div>
+      </div>
+    </template>
+    <template #footer>
+      <div style="display:flex;justify-content:space-between;width:100%">
+        <el-button v-if="rangeCurrent > 0" @click="rangeCurrent--">上一个</el-button>
+        <span v-else></span>
+        <div style="display:flex;gap:8px">
+          <el-button @click="rejectRange">跳过</el-button>
+          <el-button type="primary" @click="acceptRange" v-if="rangeResults.length > 0">采纳</el-button>
+          <el-button @click="showRangeDialog = false" v-else>关闭</el-button>
+        </div>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
 import { Check, Filter } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
-import { getTrendData, getUserIndicators } from '@/api/report'
+import { getTrendData, getUserIndicators, mergeItems, scanDuplicates, suggestRanges, updateReferenceRange } from '@/api/report'
 
 const userStore = useUserStore()
 
@@ -188,6 +362,100 @@ const categoryChartRef = ref<HTMLElement>()
 let singleChart: echarts.ECharts | null = null
 let categoryChart: echarts.ECharts | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// ===== 合并指标 =====
+const showMergeDialog = ref(false)
+const mergeForm = ref({
+  newStandardName: '',
+  category: '',
+  unit: '',
+  referenceRange: '',
+})
+const mergeSubmitting = ref(false)
+const mergeIndicators = computed(() => {
+  return allIndicators.value.filter(ind => selectedIndicators.value.includes(ind.name))
+})
+
+// ===== AI 扫描重复 =====
+const scanLoading = ref(false)
+const showScanDialog = ref(false)
+const scanGroups = ref<any[]>([])
+const scanSelections = ref<Record<number, { checked: boolean; name: string }>>({})
+const scanCurrentIndex = ref(0)
+
+// ===== AI 补全参考范围 =====
+const rangeLoading = ref(false)
+const showRangeDialog = ref(false)
+const rangeResults = ref<any[]>([])
+const rangeCurrent = ref(0)
+
+async function handleSuggestRanges() {
+  rangeLoading.value = true
+  try {
+    // 收集缺少参考范围的指标
+    const missing = allIndicators.value
+      .filter((ind: any) => !ind.referenceRange || ind.referenceRange.trim() === '')
+      .map((ind: any) => ({ name: ind.name, category: ind.category || '', unit: ind.unit || '' }))
+    if (missing.length === 0) {
+      ElMessage.info('所有指标都已有参考范围')
+      return
+    }
+    const res = await suggestRanges(missing) as any
+    rangeResults.value = res.data || []
+    rangeCurrent.value = 0
+    if (rangeResults.value.length === 0) {
+      ElMessage.info('AI 无法为当前指标建议参考范围')
+    }
+    showRangeDialog.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.message || 'AI 建议失败')
+  } finally {
+    rangeLoading.value = false
+  }
+}
+
+async function acceptRange() {
+  const item = rangeResults.value[rangeCurrent.value]
+  if (!item) return
+  try {
+    await updateReferenceRange(item.name, item.suggestedRange)
+    // 更新本地 allIndicators 中的参考范围
+    const ind = allIndicators.value.find((i: any) => i.name === item.name)
+    if (ind) ind.referenceRange = item.suggestedRange
+    ElMessage.success(`已为「${item.name}」设置参考范围: ${item.suggestedRange}`)
+  } catch (e: any) {
+    ElMessage.error('保存失败: ' + (e?.message || ''))
+  }
+  advanceRange()
+}
+
+function rejectRange() {
+  advanceRange()
+}
+
+function advanceRange() {
+  if (rangeCurrent.value >= rangeResults.value.length - 1) {
+    showRangeDialog.value = false
+    ElMessage.success('处理完毕')
+  } else {
+    rangeCurrent.value++
+  }
+}
+
+// 为 AI 扫描的指标名补充范围、单位、分类信息
+const enrichedScanNames = computed(() => {
+  const group = scanGroups.value[scanCurrentIndex.value]
+  if (!group?.names) return []
+  return group.names.map((n: string) => {
+    const ind = allIndicators.value.find((i: any) => i.name === n)
+    return {
+      name: n,
+      category: ind?.category || '',
+      unit: ind?.unit || '',
+      referenceRange: ind?.referenceRange || '',
+    }
+  })
+})
 
 // ===== 计算属性 =====
 const categories = computed(() => {
@@ -543,6 +811,241 @@ function renderCategoryChart() {
 function handleResize() {
   singleChart?.resize()
   categoryChart?.resize()
+}
+
+// ===== 合并逻辑 =====
+function openMergeDialog() {
+  const first = mergeIndicators.value[0]
+  mergeForm.value = {
+    newStandardName: first?.name || '',
+    category: first?.category || '',
+    unit: first?.unit || '',
+    referenceRange: first?.referenceRange || '',
+  }
+  showMergeDialog.value = true
+}
+
+function useRangeFrom(name: string) {
+  const ind = mergeIndicators.value.find(i => i.name === name)
+  if (ind) {
+    mergeForm.value.referenceRange = ind.referenceRange || ''
+  }
+}
+
+async function handleMerge() {
+  if (!mergeForm.value.newStandardName.trim()) return
+  mergeSubmitting.value = true
+  try {
+    await mergeItems({
+      standardNames: selectedIndicators.value,
+      newStandardName: mergeForm.value.newStandardName.trim(),
+      category: mergeForm.value.category,
+      unit: mergeForm.value.unit,
+      referenceRange: mergeForm.value.referenceRange,
+    }) as any
+    ElMessage.success('指标合并成功')
+    showMergeDialog.value = false
+    selectedIndicators.value = []
+    await fetchIndicators()
+  } catch (error: any) {
+    ElMessage.error(error?.message || '合并失败')
+  } finally {
+    mergeSubmitting.value = false
+  }
+}
+
+// ===== 导出趋势 =====
+async function exportToHtml() {
+  const names = selectedIndicators.value
+  if (names.length === 0) {
+    ElMessage.warning('请先选择指标')
+    return
+  }
+
+  // 收集所有选中指标的趋势数据
+  const allTrendData: any[] = []
+  for (const name of names) {
+    try {
+      const res = await getTrendData(userStore.userId!, name) as any
+      if (res.data) allTrendData.push(res.data)
+    } catch { /* skip */ }
+  }
+
+  if (allTrendData.length === 0) {
+    ElMessage.warning('未能获取趋势数据')
+    return
+  }
+
+  const dataJson = JSON.stringify(allTrendData)
+  const now = new Date().toLocaleDateString('zh-CN')
+
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>体检趋势报告 — ${now}</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"><\/script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #f5f5f7; color: #1d1d1f; padding: 20px; }
+h1 { font-size: 28px; font-weight: 700; text-align: center; margin: 20px 0 30px; }
+.chart-wrap { background: #fff; border-radius: 16px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.chart-title { font-size: 18px; font-weight: 600; }
+.chart-meta { font-size: 13px; color: #86868b; }
+.chart-box { width: 100%; height: 400px; }
+.normal { color: #34c759; } .high { color: #ff3b30; } .low { color: #ff9500; }
+@media (max-width: 600px) { body { padding: 10px; } .chart-box { height: 280px; } h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<h1>📊 体检趋势报告</h1>
+<div id="charts"></div>
+<script>
+var ALL_DATA = ${dataJson};
+function parseRange(ref) {
+  if (!ref) return [null, null];
+  var s = ref.trim();
+  if (s.indexOf('-') > 0) { var p = s.split('-'); return [parseFloat(p[0]), parseFloat(p[1])]; }
+  if (s.charAt(0) === '<') return [null, parseFloat(s.substring(1))];
+  if (s.charAt(0) === '>') return [parseFloat(s.substring(1)), null];
+  return [null, null];
+}
+function renderAll() {
+  var container = document.getElementById('charts');
+  container.innerHTML = '';
+  ALL_DATA.forEach(function(d, i) {
+    var wrap = document.createElement('div'); wrap.className = 'chart-wrap';
+    var header = document.createElement('div'); header.className = 'chart-header';
+    var title = document.createElement('span'); title.className = 'chart-title'; title.textContent = d.standardName || ('指标' + (i+1));
+    var meta = document.createElement('span'); meta.className = 'chart-meta';
+    meta.textContent = (d.category||'') + '  参考: ' + (d.referenceRange||'--') + '  单位: ' + (d.unit||'--');
+    header.appendChild(title); header.appendChild(meta);
+    var box = document.createElement('div'); box.className = 'chart-box';
+    wrap.appendChild(header); wrap.appendChild(box);
+    container.appendChild(wrap);
+
+    var sorted = (d.dataPoints||[]).slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
+    var dates = sorted.map(function(p){ return p.date; });
+    var values = sorted.map(function(p){ return p.value; });
+    var statuses = sorted.map(function(p){ return p.status; });
+    var range = parseRange(d.referenceRange);
+
+    var chart = echarts.init(box);
+    chart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: [d.standardName||'值', '正常范围'] },
+      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+      xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 6 ? 45 : 0 } },
+      yAxis: { type: 'value', min: function(v){ return Math.floor(v.min * 0.9); } },
+      series: [
+        {
+          name: d.standardName||'值', type: 'line', data: values,
+          markLine: range[0] != null || range[1] != null ? {
+            silent: true, symbol: 'none', lineStyle: { type: 'dashed', color: '#86868b' },
+            data: [
+              range[1] != null ? { yAxis: range[1], label: { formatter: '上限 ' + range[1] } } : null,
+              range[0] != null ? { yAxis: range[0], label: { formatter: '下限 ' + range[0] } } : null
+            ].filter(Boolean)
+          } : undefined,
+          itemStyle: { color: '#007aff' },
+          markPoint: {
+            data: values.map(function(v, j){
+              var s = statuses[j];
+              if (s === 'high') return { coord: [j, v], symbol: 'pin', symbolSize: 24, itemStyle: { color: '#ff3b30' }, label: { formatter: '↑' } };
+              if (s === 'low') return { coord: [j, v], symbol: 'pin', symbolSize: 24, itemStyle: { color: '#ff9500' }, label: { formatter: '↓' } };
+              return null;
+            }).filter(Boolean)
+          }
+        }
+      ]
+    });
+    window.addEventListener('resize', function(){ chart.resize(); });
+  });
+}
+renderAll();
+<\/script>
+</body>
+</html>`
+
+  const blob = new Blob(['﻿' + html], { type: 'text/html;charset=UTF-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `体检趋势报告_${now}.html`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success('导出成功')
+}
+
+// ===== AI 扫描逻辑 =====
+async function handleAiScan() {
+  scanLoading.value = true
+  try {
+    const res = await scanDuplicates() as any
+    const groups = res.data || []
+    if (groups.length === 0) {
+      ElMessage.info('未发现相似指标')
+      return
+    }
+    // 默认全部勾选，每组默认选第一个指标
+    const sel: Record<number, { checked: boolean; name: string }> = {}
+    groups.forEach((g: any, i: number) => {
+      sel[i] = { checked: true, name: g.names?.[0] || '' }
+    })
+    scanSelections.value = sel
+    scanGroups.value = groups
+    scanCurrentIndex.value = 0
+    showScanDialog.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.message || '扫描失败')
+  } finally {
+    scanLoading.value = false
+  }
+}
+
+async function mergeCurrentGroup() {
+  const i = scanCurrentIndex.value
+  const group = scanGroups.value[i]
+  if (!group) return
+  const target = scanSelections.value[i]?.name
+  if (!target) return
+  const targetInd = allIndicators.value.find((ind: any) => ind.name === target)
+  try {
+    await mergeItems({
+      standardNames: group.names,
+      newStandardName: target,
+      category: targetInd?.category || '',
+      unit: targetInd?.unit || '',
+      referenceRange: targetInd?.referenceRange || '',
+    }) as any
+    ElMessage.success(`已合并「${target}」`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '合并失败')
+    return
+  }
+  if (i >= scanGroups.value.length - 1) {
+    showScanDialog.value = false
+    selectedIndicators.value = []
+    await fetchIndicators()
+    ElMessage.success('全部处理完毕')
+  } else {
+    scanCurrentIndex.value++
+  }
+}
+
+function skipGroup() {
+  if (scanCurrentIndex.value >= scanGroups.value.length - 1) {
+    showScanDialog.value = false
+    selectedIndicators.value = []
+    fetchIndicators()
+    ElMessage.success('全部处理完毕')
+  } else {
+    scanCurrentIndex.value++
+  }
 }
 
 onMounted(() => {
@@ -1006,5 +1509,34 @@ onBeforeUnmount(() => {
   .tag-fade-leave-active {
     transition: opacity 0.2s ease;
   }
+}
+
+/* ===== 合并对话框 ===== */
+.merge-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.merge-section label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin-bottom: 6px;
+}
+
+.merge-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.range-row {
+  display: flex;
+  gap: 8px;
+}
+.range-row .el-input {
+  flex: 1;
 }
 </style>

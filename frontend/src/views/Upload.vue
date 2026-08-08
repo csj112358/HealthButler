@@ -259,18 +259,22 @@ const removeItem = (index: number) => {
 
 <style scoped>
 .upload-container {
-  max-width: 800px;
+  max-width: 1100px;
   margin: 0 auto;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  animation: fade-in var(--duration-350) var(--ease-out) both;
 }
-
-.upload-area {
-  width: 100%;
+.upload-container :deep(.el-card) {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .upload-actions {
-  margin-top: 20px;
+  margin-top: var(--space-lg);
   text-align: center;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-sm);
 }
 
 .result-header {
@@ -279,67 +283,40 @@ const removeItem = (index: number) => {
   align-items: center;
 }
 
-.edit-basic-info {
-  margin-bottom: 16px;
-}
+.edit-basic-info { margin-bottom: var(--space-md); }
 
 .edit-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-xs);
 }
-
 .edit-field label {
   font-size: 13px;
   font-weight: 600;
-  color: #606266;
+  color: var(--text-secondary);
 }
 
 .table-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 16px;
+  margin-top: var(--space-md);
   margin-bottom: 10px;
 }
-
-.table-header h4 {
-  margin: 0;
-}
+.table-header h4 { margin: 0; }
 
 .result-actions {
-  margin-top: 20px;
+  margin-top: var(--space-lg);
   text-align: center;
 }
 
-/* Apple 风格卡片 */
-.upload-container :deep(.el-card) {
-  border-radius: 16px;
-  border: 0.5px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-}
-
-.upload-container :deep(.el-card__header) {
-  border-bottom: 0.5px solid rgba(0, 0, 0, 0.06);
-}
-
 .result-card {
-  border-radius: 14px;
+  border-radius: var(--radius-md) !important;
+}
+.result-card :deep(.el-card__body) {
+  padding: 12px;
 }
 
-/* Apple 风格按钮 */
-.upload-container :deep(.el-button--primary) {
-  background: #007aff;
-  border-color: #007aff;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-.upload-container :deep(.el-button--primary:active) {
-  transform: scale(0.97);
-}
-
-/* Apple 风格 Tab */
 .upload-container :deep(.el-tabs__item) {
   font-weight: 500;
 }

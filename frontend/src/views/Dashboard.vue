@@ -93,6 +93,10 @@
               <el-icon><FirstAidKit /></el-icon>
               AI诊断
             </el-button>
+            <el-button type="info" @click="handleExport" :loading="exporting">
+              <el-icon><Download /></el-icon>
+              导出全部数据
+            </el-button>
           </div>
         </el-card>
       </el-col>
@@ -105,6 +109,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { getUserReports } from '@/api/report'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -132,14 +137,60 @@ const viewReport = (id: number) => {
   router.push(`/reports/${id}`)
 }
 
+const exporting = ref(false)
+
+const handleExport = async () => {
+  exporting.value = true
+  try {
+    // 后端直接生成 HTML 并下载，前端只需请求文件
+    const token = localStorage.getItem('token') || ''
+    const resp = await fetch('/api/report/export/' + userStore.userId!, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    })
+    if (!resp.ok) throw new Error('导出失败: HTTP ' + resp.status)
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = '体检数据_' + new Date().toLocaleDateString('zh-CN') + '.html'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
 onMounted(() => {
   fetchReports()
 })
 </script>
 
 <style scoped>
+.dashboard {
+  animation: fade-in var(--duration-350) var(--ease-out) both;
+}
+
 .stat-card {
   text-align: center;
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+.stat-card :deep(.el-card__header) {
+  padding: 12px 16px 8px !important;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: -0.01em;
+  border-bottom: none !important;
+}
+.stat-card :deep(.el-card__body) {
+  padding: 4px 16px 16px !important;
 }
 
 .card-header {
@@ -147,29 +198,39 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
-
-.stat-value {
-  font-size: 36px;
-  font-weight: bold;
-  color: #409eff;
+.card-header .el-icon {
+  color: var(--color-blue);
+  font-size: 18px;
 }
 
+.stat-value {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
 .stat-value.warning {
-  color: #e6a23c;
+  color: var(--color-orange);
 }
 
 .stat-label {
-  color: #909399;
-  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  font-weight: 500;
 }
 
 .quick-actions {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
-
 .quick-actions .el-button {
   width: 100%;
+  justify-content: flex-start;
+  padding-left: 16px !important;
+  font-size: 14px !important;
 }
 </style>

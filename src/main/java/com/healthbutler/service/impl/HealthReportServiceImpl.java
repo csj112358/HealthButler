@@ -2,18 +2,20 @@ package com.healthbutler.service.impl;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.healthbutler.entity.AiDiagnosis;
 import com.healthbutler.entity.HealthItem;
 import com.healthbutler.entity.HealthReport;
 import com.healthbutler.entity.ItemDictionary;
+import com.healthbutler.entity.User;
+import com.healthbutler.exception.BusinessException;
 import com.healthbutler.mapper.AiDiagnosisMapper;
 import com.healthbutler.mapper.HealthItemMapper;
 import com.healthbutler.mapper.HealthReportMapper;
 import com.healthbutler.mapper.ItemDictionaryMapper;
 import com.healthbutler.service.AiService;
 import com.healthbutler.service.HealthReportService;
-import com.healthbutler.service.OssService;
 import com.healthbutler.vo.DiagnosisResult;
 import com.healthbutler.vo.OcrResult;
 import com.healthbutler.vo.TrendData;
@@ -24,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -34,9 +37,6 @@ public class HealthReportServiceImpl implements HealthReportService {
 
     @Autowired
     private AiService aiService;
-
-    @Autowired
-    private OssService ossService;
 
     @Autowired
     private HealthReportMapper healthReportMapper;
@@ -50,15 +50,23 @@ public class HealthReportServiceImpl implements HealthReportService {
     @Autowired
     private AiDiagnosisMapper aiDiagnosisMapper;
 
+    @Autowired
+    private com.healthbutler.mapper.UserMapper userMapper;
+
     @Override
     @Transactional
     @CacheEvict(value = {"userReports", "trendData", "categoryTrendData"}, allEntries = true)
     public Long uploadAndExtract(Long userId, MultipartFile file) {
-        // 1. 上传图片到OSS（这里简化处理，实际应该上传到对象存储）
-        String imageUrl = uploadImage(file);
+        // 1. 读取文件字节
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            throw new BusinessException(500, "读取上传文件失败", e);
+        }
 
-        // 2. 调用AI进行OCR识别
-        OcrResult ocrResult = aiService.extractReportData(imageUrl);
+        // 2. 调用多模态视觉大模型进行识别
+        OcrResult ocrResult = aiService.extractReportData(fileBytes);
 
         // 3. 保存报告基本信息
         HealthReport report = new HealthReport();
@@ -72,7 +80,7 @@ public class HealthReportServiceImpl implements HealthReportService {
         }
 
         report.setHospital(ocrResult.getHospital() != null ? ocrResult.getHospital() : "未知医院");
-        report.setImageUrl(imageUrl);
+        report.setImageUrl(null);
         report.setAiRawResponse(JSON.toJSONString(ocrResult));
         report.setStatus(0); // 待审核
         healthReportMapper.insert(report);
@@ -128,7 +136,7 @@ public class HealthReportServiceImpl implements HealthReportService {
     public void confirmReport(Long reportId, Map<String, Object> editedData) {
         HealthReport report = healthReportMapper.selectById(reportId);
         if (report == null) {
-            throw new RuntimeException("报告不存在");
+            throw new BusinessException(404, "报告不存在");
         }
 
         // 如果用户编辑了数据，先更新报告和指标
@@ -179,17 +187,32 @@ public class HealthReportServiceImpl implements HealthReportService {
                             healthItem.setDictionaryId(dictionary.getId());
                             healthItem.setStandardName(dictionary.getStandardName());
                             healthItem.setReferenceRange(dictionary.getReferenceRange());
+                            // 如果分类为空，用字典的分类填补
+                            if (item.get("category") == null || ((String) item.get("category")).trim().isEmpty()) {
+                                healthItem.setCategory(dictionary.getCategory());
+                            }
                             if (valueObj != null) {
-                                healthItem.setStatus(determineStatus(
-                                        Double.parseDouble(valueObj.toString()), dictionary.getReferenceRange()));
+                                String status = determineStatus(
+                                        Double.parseDouble(valueObj.toString()), dictionary.getReferenceRange());
+                                healthItem.setStatus(status != null ? status : normalizeStatus((String) item.get("status")));
                             } else {
                                 healthItem.setStatus("normal");
                             }
                         } else {
                             healthItem.setStandardName((String) item.get("name"));
-                            healthItem.setStatus(normalizeStatus((String) item.get("status")));
+                            String status = null;
+                            if (valueObj != null) {
+                                status = determineStatus(
+                                        Double.parseDouble(valueObj.toString()),
+                                        (String) item.get("referenceRange"));
+                            }
+                            healthItem.setStatus(status != null ? status : normalizeStatus((String) item.get("status")));
                         }
 
+                        // 最终兜底：分类为空时设为"其他"
+                        if (healthItem.getCategory() == null || healthItem.getCategory().trim().isEmpty()) {
+                            healthItem.setCategory("其他");
+                        }
                         healthItemMapper.insert(healthItem);
                     }
                 }
@@ -206,7 +229,7 @@ public class HealthReportServiceImpl implements HealthReportService {
     public void updateReport(Long reportId, Map<String, Object> editedData) {
         HealthReport report = healthReportMapper.selectById(reportId);
         if (report == null) {
-            throw new RuntimeException("报告不存在");
+            throw new BusinessException(404, "报告不存在");
         }
 
         // 更新报告基本信息
@@ -251,17 +274,32 @@ public class HealthReportServiceImpl implements HealthReportService {
                         healthItem.setDictionaryId(dictionary.getId());
                         healthItem.setStandardName(dictionary.getStandardName());
                         healthItem.setReferenceRange(dictionary.getReferenceRange());
+                        // 如果分类为空，用字典的分类填补
+                        if (item.get("category") == null || ((String) item.get("category")).trim().isEmpty()) {
+                            healthItem.setCategory(dictionary.getCategory());
+                        }
                         if (valueObj != null) {
-                            healthItem.setStatus(determineStatus(
-                                    Double.parseDouble(valueObj.toString()), dictionary.getReferenceRange()));
+                            String status = determineStatus(
+                                    Double.parseDouble(valueObj.toString()), dictionary.getReferenceRange());
+                            healthItem.setStatus(status != null ? status : normalizeStatus((String) item.get("status")));
                         } else {
                             healthItem.setStatus("normal");
                         }
                     } else {
                         healthItem.setStandardName((String) item.get("name"));
-                        healthItem.setStatus(normalizeStatus((String) item.get("status")));
+                        String status = null;
+                        if (valueObj != null) {
+                            status = determineStatus(
+                                    Double.parseDouble(valueObj.toString()),
+                                    (String) item.get("referenceRange"));
+                        }
+                        healthItem.setStatus(status != null ? status : normalizeStatus((String) item.get("status")));
                     }
 
+                    // 最终兜底：分类为空时设为"其他"
+                    if (healthItem.getCategory() == null || healthItem.getCategory().trim().isEmpty()) {
+                        healthItem.setCategory("其他");
+                    }
                     healthItemMapper.insert(healthItem);
                 }
             }
@@ -274,7 +312,7 @@ public class HealthReportServiceImpl implements HealthReportService {
     public void deleteReport(Long reportId) {
         HealthReport report = healthReportMapper.selectById(reportId);
         if (report == null) {
-            throw new RuntimeException("报告不存在");
+            throw new BusinessException(404, "报告不存在");
         }
         // 先删除关联的指标明细
         healthItemMapper.delete(
@@ -299,7 +337,7 @@ public class HealthReportServiceImpl implements HealthReportService {
     public Map<String, Object> getReportDetail(Long reportId) {
         HealthReport report = healthReportMapper.selectById(reportId);
         if (report == null) {
-            throw new RuntimeException("报告不存在");
+            throw new BusinessException(404, "报告不存在");
         }
         // 查询关联的指标明细
         List<HealthItem> items = healthItemMapper.selectList(
@@ -440,13 +478,6 @@ public class HealthReportServiceImpl implements HealthReportService {
     }
 
     /**
-     * 上传图片到存储服务
-     */
-    private String uploadImage(MultipartFile file) {
-        return ossService.uploadFile(file, "health-reports");
-    }
-
-    /**
      * 保存指标明细
      */
     private void saveHealthItems(Long reportId, Long userId, List<OcrResult.Item> items) {
@@ -464,15 +495,25 @@ public class HealthReportServiceImpl implements HealthReportService {
             if (dictionary != null) {
                 healthItem.setDictionaryId(dictionary.getId());
                 healthItem.setStandardName(dictionary.getStandardName());
-                // 使用字典中的参考区间
                 healthItem.setReferenceRange(dictionary.getReferenceRange());
-                // 根据参考区间判断状态（优先使用字典，不依赖AI）
-                healthItem.setStatus(determineStatus(item.getValue(), dictionary.getReferenceRange()));
+                // 如果 AI 没有返回分类，用字典的分类填补
+                if (item.getCategory() == null || item.getCategory().trim().isEmpty()) {
+                    healthItem.setCategory(dictionary.getCategory());
+                }
+                // 优先用程序根据参考区间计算状态
+                String status = determineStatus(item.getValue(), dictionary.getReferenceRange());
+                healthItem.setStatus(status != null ? status : normalizeStatus(item.getStatus()));
             } else {
                 healthItem.setStandardName(item.getName());
                 healthItem.setReferenceRange(item.getReferenceRange());
-                // 没有字典时使用AI返回的状态
-                healthItem.setStatus(normalizeStatus(item.getStatus()));
+                // 先尝试用参考区间程序化判断，失败则降级使用AI返回的状态
+                String status = determineStatus(item.getValue(), item.getReferenceRange());
+                healthItem.setStatus(status != null ? status : normalizeStatus(item.getStatus()));
+            }
+
+            // 最终兜底：如果分类仍然为空，设为"其他"
+            if (healthItem.getCategory() == null || healthItem.getCategory().trim().isEmpty()) {
+                healthItem.setCategory("其他");
             }
 
             healthItemMapper.insert(healthItem);
@@ -480,22 +521,22 @@ public class HealthReportServiceImpl implements HealthReportService {
     }
 
     /**
-     * 根据参考区间判断状态
+     * 根据参考区间判断状态。
      * @param value 检测值
      * @param referenceRange 参考区间（如 "9-50", "≤23.0", "<3.37"）
-     * @return normal/high/low
+     * @return normal/high/low，无法解析时返回 null 让调用方降级处理
      */
     private String determineStatus(Double value, String referenceRange) {
-        if (referenceRange == null || referenceRange.isEmpty()) return "normal";
+        if (referenceRange == null || referenceRange.isEmpty()) return null;
         String range = referenceRange.trim();
 
         try {
-            // 处理 "≤X" 格式
+            // 处理 "≤X" 或 "<=X" 格式
             if (range.startsWith("≤") || range.startsWith("<=")) {
                 double max = Double.parseDouble(range.replace("≤", "").replace("<=", "").trim());
                 return value <= max ? "normal" : "high";
             }
-            // 处理 "≥X" 格式
+            // 处理 "≥X" 或 ">=X" 格式
             if (range.startsWith("≥") || range.startsWith(">=")) {
                 double min = Double.parseDouble(range.replace("≥", "").replace(">=", "").trim());
                 return value >= min ? "normal" : "low";
@@ -510,9 +551,9 @@ public class HealthReportServiceImpl implements HealthReportService {
                 double min = Double.parseDouble(range.substring(1).trim());
                 return value > min ? "normal" : "low";
             }
-            // 处理 "X-Y" 格式
-            if (range.contains("-")) {
-                String[] parts = range.split("-");
+            // 处理 "X-Y" 或 "X~Y" 格式
+            if (range.contains("-") || range.contains("~")) {
+                String[] parts = range.split("[-~]");
                 double min = Double.parseDouble(parts[0].trim());
                 double max = Double.parseDouble(parts[1].trim());
                 if (value < min) return "low";
@@ -520,11 +561,12 @@ public class HealthReportServiceImpl implements HealthReportService {
                 return "normal";
             }
         } catch (NumberFormatException e) {
-            // 解析失败时返回normal
-            return "normal";
+            // 解析失败，返回 null 让调用方降级
+            return null;
         }
 
-        return "normal";
+        // 格式不匹配任何已知模式，返回 null
+        return null;
     }
 
     @Override
@@ -616,6 +658,263 @@ public class HealthReportServiceImpl implements HealthReportService {
                 new LambdaQueryWrapper<ItemDictionary>()
                         .eq(ItemDictionary::getStandardName, standardName)
         );
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = {"trendData", "categoryTrendData", "reportDetail", "userReports"}, allEntries = true)
+    public void mergeItems(Long userId, List<String> standardNames, String newStandardName, String category, String unit, String referenceRange) {
+        if (standardNames == null || standardNames.size() < 2) {
+            throw new BusinessException(400, "请至少选择2个指标进行合并");
+        }
+        if (newStandardName == null || newStandardName.trim().isEmpty()) {
+            throw new BusinessException(400, "合并后的指标名称不能为空");
+        }
+
+        // 1. 查询这些名称对应的所有指标记录
+        List<HealthItem> allItems = healthItemMapper.selectList(
+                new LambdaQueryWrapper<HealthItem>()
+                        .eq(HealthItem::getUserId, userId)
+                        .in(HealthItem::getStandardName, standardNames)
+        );
+
+        // 也查出 originalName 匹配的
+        List<HealthItem> byOriginal = healthItemMapper.selectList(
+                new LambdaQueryWrapper<HealthItem>()
+                        .eq(HealthItem::getUserId, userId)
+                        .in(HealthItem::getOriginalName, standardNames)
+        );
+        Set<Long> seenIds = new HashSet<>();
+        for (HealthItem item : allItems) seenIds.add(item.getId());
+        for (HealthItem item : byOriginal) {
+            if (!seenIds.contains(item.getId())) {
+                allItems.add(item);
+            }
+        }
+
+        if (allItems.isEmpty()) {
+            throw new BusinessException(400, "未找到指定的指标");
+        }
+
+        // 2. 收集所有原始名称作为别名
+        Set<String> aliases = new LinkedHashSet<>();
+        for (HealthItem item : allItems) {
+            if (item.getOriginalName() != null && !item.getOriginalName().trim().isEmpty()) {
+                aliases.add(item.getOriginalName().trim());
+            }
+        }
+        // 被选中的标准名也加入别名
+        aliases.addAll(standardNames);
+
+        // 3. 查找或创建 item_dictionary 记录
+        ItemDictionary dictionary = itemDictionaryMapper.selectOne(
+                new LambdaQueryWrapper<ItemDictionary>()
+                        .eq(ItemDictionary::getStandardName, newStandardName)
+        );
+
+        if (dictionary == null) {
+            dictionary = new ItemDictionary();
+            dictionary.setStandardName(newStandardName.trim());
+            dictionary.setCategory(category != null ? category.trim() : "其他");
+            dictionary.setUnit(unit != null ? unit.trim() : "");
+            dictionary.setReferenceRange(referenceRange != null ? referenceRange.trim() : "");
+            dictionary.setAliases(JSON.toJSONString(new ArrayList<>(aliases)));
+            itemDictionaryMapper.insert(dictionary);
+        } else {
+            Set<String> existingAliases = new LinkedHashSet<>();
+            if (dictionary.getAliases() != null) {
+                JSONArray arr = JSON.parseArray(dictionary.getAliases());
+                for (int i = 0; i < arr.size(); i++) {
+                    existingAliases.add(arr.getString(i));
+                }
+            }
+            existingAliases.addAll(aliases);
+            dictionary.setAliases(JSON.toJSONString(new ArrayList<>(existingAliases)));
+            if (unit != null && !unit.trim().isEmpty()) dictionary.setUnit(unit.trim());
+            if (referenceRange != null && !referenceRange.trim().isEmpty()) dictionary.setReferenceRange(referenceRange.trim());
+            if (category != null && !category.trim().isEmpty()) dictionary.setCategory(category.trim());
+            itemDictionaryMapper.updateById(dictionary);
+        }
+
+        // 4. 批量更新所有指标
+        for (HealthItem item : allItems) {
+            item.setStandardName(newStandardName.trim());
+            item.setDictionaryId(dictionary.getId());
+            item.setCategory(dictionary.getCategory());
+            item.setUnit(dictionary.getUnit());
+            item.setReferenceRange(dictionary.getReferenceRange());
+            if (item.getValue() != null) {
+                item.setStatus(determineStatus(item.getValue().doubleValue(), dictionary.getReferenceRange()));
+            }
+            healthItemMapper.updateById(item);
+        }
+    }
+
+    @Override
+    public List<Map<String, Object>> scanDuplicateIndicators(Long userId) {
+        // 1. 获取用户所有不重复的指标名称
+        List<HealthItem> allItems = healthItemMapper.selectList(
+                new LambdaQueryWrapper<HealthItem>()
+                        .eq(HealthItem::getUserId, userId)
+        );
+        Set<String> names = new LinkedHashSet<>();
+        for (HealthItem item : allItems) {
+            String name = item.getStandardName();
+            if (name == null || name.trim().isEmpty()) {
+                name = item.getOriginalName();
+            }
+            if (name != null && !name.trim().isEmpty()) {
+                names.add(name.trim());
+            }
+        }
+
+        if (names.size() < 2) {
+            return new ArrayList<>();
+        }
+
+        // 2. 调用AI扫描重复指标
+        String aiResult = aiService.findDuplicateIndicators(new ArrayList<>(names));
+
+        // 3. 解析AI返回的JSON
+        try {
+            JSONObject resultJson = JSON.parseObject(aiResult);
+            JSONArray groups = resultJson.getJSONArray("groups");
+            if (groups == null || groups.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (int i = 0; i < groups.size(); i++) {
+                JSONObject group = groups.getJSONObject(i);
+                Map<String, Object> groupMap = new HashMap<>();
+                groupMap.put("names", group.getJSONArray("names").toJavaList(String.class));
+                groupMap.put("reason", group.getString("reason"));
+                result.add(groupMap);
+            }
+            return result;
+        } catch (Exception e) {
+            // AI返回格式异常，返回空列表
+            return new ArrayList<>();
+        }
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = {"trendData", "categoryTrendData", "reportDetail", "userReports"}, allEntries = true)
+    public void updateReferenceRange(String standardName, String referenceRange) {
+        if (standardName == null || standardName.trim().isEmpty()) return;
+        if (referenceRange == null || referenceRange.trim().isEmpty()) return;
+
+        // 1. 更新或创建 item_dictionary 记录
+        ItemDictionary dictionary = itemDictionaryMapper.selectOne(
+                new LambdaQueryWrapper<ItemDictionary>()
+                        .eq(ItemDictionary::getStandardName, standardName.trim()));
+        if (dictionary != null) {
+            dictionary.setReferenceRange(referenceRange.trim());
+            itemDictionaryMapper.updateById(dictionary);
+        } else {
+            dictionary = new ItemDictionary();
+            dictionary.setStandardName(standardName.trim());
+            dictionary.setCategory("其他");
+            dictionary.setUnit("");
+            dictionary.setReferenceRange(referenceRange.trim());
+            dictionary.setAliases("[]");
+            itemDictionaryMapper.insert(dictionary);
+        }
+
+        // 2. 更新所有关联的 health_item 记录
+        List<HealthItem> items = healthItemMapper.selectList(
+                new LambdaQueryWrapper<HealthItem>()
+                        .eq(HealthItem::getStandardName, standardName.trim()));
+        for (HealthItem item : items) {
+            item.setReferenceRange(referenceRange.trim());
+            if (item.getValue() != null) {
+                String status = determineStatus(item.getValue().doubleValue(), referenceRange.trim());
+                if (status != null) item.setStatus(status);
+            }
+            healthItemMapper.updateById(item);
+        }
+    }
+
+    @Override
+    public Map<String, Object> exportAllData(Long userId) {
+        Map<String, Object> result = new HashMap<>();
+
+        // 1. 用户信息
+        User user = userMapper.selectById(userId);
+        if (user == null) throw new BusinessException(404, "用户不存在");
+        Map<String, Object> userMap = new HashMap<>();
+        userMap.put("id", user.getId());
+        userMap.put("username", user.getUsername());
+        userMap.put("gender", user.getGender());
+        userMap.put("birthDate", user.getBirthDate());
+        result.put("user", userMap);
+
+        // 2. 所有报告及指标（包括待审核和已确认）
+        List<HealthReport> reports = healthReportMapper.selectList(
+                new LambdaQueryWrapper<HealthReport>()
+                        .eq(HealthReport::getUserId, userId)
+                        .orderByAsc(HealthReport::getReportDate)
+        );
+
+        List<Map<String, Object>> reportList = new ArrayList<>();
+        for (HealthReport report : reports) {
+            Map<String, Object> reportMap = new HashMap<>();
+            reportMap.put("id", report.getId());
+            reportMap.put("date", report.getReportDate());
+            reportMap.put("hospital", report.getHospital());
+
+            List<HealthItem> items = healthItemMapper.selectList(
+                    new LambdaQueryWrapper<HealthItem>()
+                            .eq(HealthItem::getReportId, report.getId())
+            );
+            List<Map<String, Object>> itemList = new ArrayList<>();
+            for (HealthItem item : items) {
+                Map<String, Object> itemMap = new HashMap<>();
+                itemMap.put("id", item.getId());
+                itemMap.put("name", item.getStandardName() != null ? item.getStandardName() : item.getOriginalName());
+                itemMap.put("originalName", item.getOriginalName());
+                itemMap.put("category", item.getCategory());
+                itemMap.put("value", item.getValue());
+                itemMap.put("unit", item.getUnit());
+                itemMap.put("referenceRange", item.getReferenceRange());
+                itemMap.put("status", item.getStatus());
+                itemList.add(itemMap);
+            }
+            reportMap.put("items", itemList);
+            reportList.add(reportMap);
+        }
+        result.put("reports", reportList);
+
+        // 3. 指标字典
+        List<ItemDictionary> dictionaries = itemDictionaryMapper.selectList(null);
+        List<Map<String, Object>> dictList = new ArrayList<>();
+        for (ItemDictionary dict : dictionaries) {
+            Map<String, Object> dictMap = new HashMap<>();
+            dictMap.put("standardName", dict.getStandardName());
+            dictMap.put("category", dict.getCategory());
+            dictMap.put("unit", dict.getUnit());
+            dictMap.put("referenceRange", dict.getReferenceRange());
+            dictList.add(dictMap);
+        }
+        result.put("dictionary", dictList);
+
+        // 4. AI诊断记录
+        List<AiDiagnosis> diagnoses = aiDiagnosisMapper.selectList(
+                new LambdaQueryWrapper<AiDiagnosis>()
+                        .eq(AiDiagnosis::getUserId, userId)
+                        .orderByDesc(AiDiagnosis::getDiagnosisDate)
+        );
+        List<Map<String, Object>> diagList = new ArrayList<>();
+        for (AiDiagnosis diag : diagnoses) {
+            Map<String, Object> diagMap = new HashMap<>();
+            diagMap.put("date", diag.getDiagnosisDate());
+            diagMap.put("content", diag.getDiagnosisContent());
+            diagList.add(diagMap);
+        }
+        result.put("diagnoses", diagList);
+
+        return result;
     }
 
     /**

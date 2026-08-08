@@ -146,19 +146,51 @@ const handleRegister = async () => {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--bg-primary);
+  padding: 24px;
 }
 
 .login-card {
   width: 400px;
+  max-width: 100%;
+  background: var(--glass-bg-heavy);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-xl) !important;
+  animation: scale-in var(--duration-350) var(--ease-spring) both;
+}
+.login-card :deep(.el-card__header) {
+  text-align: center;
+  padding: 24px 24px 8px !important;
+  border-bottom: none !important;
+}
+.login-card :deep(.el-card__body) {
+  padding: 8px 24px 24px !important;
 }
 
 .login-title {
-  text-align: center;
-  color: #303133;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+  margin: 0;
 }
 
 .login-footer {
   text-align: center;
+  margin-top: 4px;
+}
+.login-footer :deep(.el-link) {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    width: 100%;
+  }
 }
 </style>

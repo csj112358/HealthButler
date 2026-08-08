@@ -19,7 +19,7 @@
 主机名:        127.0.0.1
 端口:          3306
 用户名:        root
-密码:          your_password
+密码:          123456
 ```
 
 填好后点右下角 **"打开"**。
@@ -40,7 +40,7 @@
 
 ## 二、导入数据库（新电脑）
 
-新电脑上也下载 HeidiSQL 便携版 → 连接 MySQL（同样 root / your_password）→ 打开：
+新电脑上也下载 HeidiSQL 便携版 → 连接 MySQL（同样 root / 123456）→ 打开：
 
 1. 顶部菜单栏点 **"文件"** → **"载入 SQL 文件…"**
 2. 选 U 盘里的 `health_butler.sql`，点打开
@@ -58,8 +58,8 @@
 
 | 操作 | 路径 |
 |------|------|
-| 旧电脑 | `your-project-path` |
-| 新电脑 | `your-project-path`（同路径） |
+| 旧电脑 | `E:\Github\C_Check_Up_Home` |
+| 新电脑 | `E:\Github\C_Check_Up_Home`（同路径） |
 
 复制时**跳过这三个文件夹**（太大，后面会重新生成）：
 
@@ -71,7 +71,7 @@
 
 ## 四、安装依赖（新电脑）
 
-在新电脑的 `your-project-path` 目录里，按住 Shift + 右键 → **在此处打开 PowerShell**，分别跑：
+在新电脑的 `E:\Github\C_Check_Up_Home` 目录里，按住 Shift + 右键 → **在此处打开 PowerShell**，分别跑：
 
 ```bash
 mvn dependency:resolve          # 后端依赖，一次性
@@ -87,5 +87,12 @@ cd frontend; npm install        # 前端依赖，一次性
 - JDK 17+
 - Maven
 - Node.js + npm
-- MySQL 8.0（root 密码设 `your_password`）
-- Redis
+- MySQL 8.0+（root 密码设 `123456`）
+- Redis（Windows 推荐用 [Memurai](https://www.memurai.com/)）
+
+> ⚠️ MySQL 装好后，建议以**管理员身份**执行以下命令，防止开机端口占用问题：
+> ```cmd
+> sc config MySQL80 start=delayed-auto
+> sc failure MySQL80 reset=30 actions=restart/5000/restart/10000/restart/30000
+> ```
+> 详细说明见 [README → 常见问题排查](README.md#-开机后-mysql-端口-3306-被占用)。

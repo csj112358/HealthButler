@@ -81,9 +81,53 @@ export function generateDiagnosis(userId: number, reportIds: number[]) {
   })
 }
 
+export function scanDuplicates() {
+  return request({
+    url: '/report/scan-duplicates',
+    method: 'post',
+  })
+}
+
+export function mergeItems(data: {
+  standardNames: string[]
+  newStandardName: string
+  category: string
+  unit: string
+  referenceRange: string
+}) {
+  return request({
+    url: '/report/merge-items',
+    method: 'post',
+    data,
+  })
+}
+
+export function exportAllData(userId: number) {
+  return request({
+    url: `/report/export/${userId}`,
+    method: 'get',
+  })
+}
+
 export function getUserIndicators(userId: number) {
   return request({
     url: `/report/indicators/${userId}`,
     method: 'get',
+  })
+}
+
+export function suggestRanges(indicators: { name: string; category: string; unit: string }[]) {
+  return request({
+    url: '/report/suggest-ranges',
+    method: 'post',
+    data: { indicators },
+  })
+}
+
+export function updateReferenceRange(name: string, referenceRange: string) {
+  return request({
+    url: '/report/update-range',
+    method: 'put',
+    data: { name, referenceRange },
   })
 }
